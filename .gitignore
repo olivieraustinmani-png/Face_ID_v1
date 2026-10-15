@@ -1,0 +1,27 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environnement virtuel
+.venv/
+venv/
+env/
+
+# Modèles volumineux
+models/*.onnx
+
+# Confidentialité des données étudiantes (Section 12 du README)
+# Ne pas versionner les photos réelles des étudiants
+dataset/*/*.jpg
+dataset/*/*.jpeg
+dataset/*/*.png
+!dataset/**/.gitkeep
+
+# Résultats et captures temporaires
+results/screenshots/*.png
+results/screenshots/*.jpg
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+

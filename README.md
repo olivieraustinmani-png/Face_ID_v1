@@ -211,19 +211,47 @@ Les images doivent être collectées avec le consentement des participants et ut
 
 ## 9. Utilisation de l'application
 
-Les commandes exactes seront ajoutées après l'implémentation de l'application.
+L'application propose un point d'entrée unique [main.py](file:///c:/Users/Austin/Desktop/Face_ID_v1/main.py) utilisable soit via un menu textuel interactif, soit en ligne de commande.
 
-Le fonctionnement prévu est le suivant :
+### 9.1. Lancement du menu interactif
+```bash
+python main.py
+```
 
-1. L'utilisateur lance l'application.
-2. Il choisit d'utiliser la webcam ou de charger une image.
-3. Le système détecte les visages présents.
-4. Chaque visage détecté est comparé aux représentations enregistrées.
-5. Le système vérifie si la meilleure correspondance satisfait le seuil de décision.
-6. Le nom de l'étudiant et le score correspondant sont affichés si la correspondance est acceptée.
-7. La mention « Inconnu » est affichée si aucune correspondance n'est suffisamment fiable.
+### 9.2. Collecte des images d'un étudiant (Webcam)
+Pour alimenter le dossier `dataset/student_XX/` avec 30 photos :
+```bash
+python main.py --mode capture --student student_01
+```
+* Commandes durant la capture :
+  * `[ESPACE]` ou `[C]` : Capturer une photo
+  * `[A]` : Activer/Désactiver le mode rafale automatique (1 photo toutes les 0.6 s)
+  * `[Q]` : Quitter la capture
 
-Les instructions de lancement seront précisées dès que le point d'entrée et les modules seront opérationnels.
+### 9.3. Encodage du jeu de données (Deep Learning SFace)
+Après avoir ajouté des photos dans `dataset/` :
+```bash
+python main.py --mode encode
+```
+Cette commande génère la base d'empreintes faciales dans `models/encodings.pkl`.
+
+### 9.4. Reconnaissance en temps réel (Webcam)
+```bash
+python main.py --mode webcam
+```
+* Touche `[S]` : Sauvegarder une capture d'écran annotée dans `results/screenshots/`.
+* Touche `[Q]` ou `[Échap]` : Quitter.
+
+### 9.5. Reconnaissance sur une image fixe
+```bash
+python main.py --mode image --image chemin/vers/image.jpg
+```
+
+### 9.6. Évaluation et benchmark automatique
+Pour exécuter les tests et générer le rapport dans `results/test_results.csv` :
+```bash
+python src/evaluate.py
+```
 
 ## 10. Tests et évaluation
 
@@ -302,16 +330,16 @@ Chaque membre doit contribuer concrètement au projet et être capable d'expliqu
 
 ## 15. État d'avancement
 
-* [ ] Environnement Python configuré.
-* [ ] Structure du projet créée.
-* [ ] Détection faciale fonctionnelle.
-* [ ] Jeu de données préparé.
-* [ ] Méthode de reconnaissance choisie.
-* [ ] Reconnaissance des étudiants fonctionnelle.
-* [ ] Gestion des personnes inconnues implémentée.
-* [ ] Tests réalisés et documentés.
-* [ ] Notebook finalisé.
-* [ ] Documentation complétée.
+* [x] Environnement Python configuré.
+* [x] Structure du projet créée.
+* [x] Détection faciale fonctionnelle (YuNet ONNX).
+* [ ] Jeu de données préparé (en attente des photos des 5 étudiants).
+* [x] Méthode de reconnaissance choisie (SFace Deep Learning 128D).
+* [x] Reconnaissance des étudiants fonctionnelle.
+* [x] Gestion des personnes inconnues implémentée (seuil de similarité cosinus).
+* [ ] Tests réalisés et documentés sur les 5 étudiants.
+* [x] Notebook d'expérimentation initialisé.
+* [x] Documentation et guide d'utilisation complétés.
 * [ ] Rapport final rédigé.
 * [ ] Démonstration validée.
 
