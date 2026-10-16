@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 import argparse
 import sys
+import time
 import cv2
 import numpy as np
 
@@ -33,6 +34,9 @@ def run_webcam(recognizer: FaceRecognizer, camera_index: int = 0) -> None:
     print("   [Q] ou [ÉCHAP] : Quitter l'application")
     print("=" * 65 + "\n")
 
+    prev_time = time.time()
+    fps = 0.0
+
     try:
         while True:
             ret, frame = cap.read()
@@ -40,12 +44,26 @@ def run_webcam(recognizer: FaceRecognizer, camera_index: int = 0) -> None:
                 print("[ERREUR] Erreur de lecture du flux vidéo.")
                 break
 
+            now = time.time()
+            fps = 0.9 * fps + 0.1 * (1.0 / max(1e-5, (now - prev_time)))
+            prev_time = now
+
             # Détection et identification
             results = recognizer.recognize_frame(frame)
             annotated = recognizer.annotate_frame(frame, results)
 
-            # Informations d'état
+            # Informations d'état et FPS
             h, w = frame.shape[:2]
+            cv2.putText(
+                annotated,
+                f"FPS: {fps:.1f}",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 0),
+                2,
+                cv2.LINE_AA,
+            )
             cv2.putText(
                 annotated,
                 f"Etudiants en base: {len(set(recognizer.known_names))} | Seuil: {recognizer.cosine_threshold:.2f}",

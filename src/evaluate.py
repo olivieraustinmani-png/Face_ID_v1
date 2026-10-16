@@ -1,13 +1,13 @@
 """
 Module d'évaluation et de benchmark du système de reconnaissance faciale.
 Génère le rapport de test dans results/test_results.csv conformément à la section 10 du README.
+Fonctionne nativement avec le module standard csv (indépendant de pandas).
 """
 
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import csv
 import cv2
-import pandas as pd
 
 from src.recognize_faces import FaceRecognizer
 
@@ -18,12 +18,13 @@ def evaluate_dataset(
     recognizer: FaceRecognizer,
     test_dir: Path,
     output_csv: Path = RESULTS_CSV,
-) -> pd.DataFrame:
+) -> List[Dict[str, Any]]:
     """
     Évalue les performances du système sur un ensemble d'images de test.
 
     Colonnes enregistrées :
     - test_id
+    - image_name
     - expected_identity
     - predicted_identity
     - confidence_score
@@ -33,7 +34,7 @@ def evaluate_dataset(
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     valid_exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
-    records: List[Dict] = []
+    records: List[Dict[str, Any]] = []
     test_id = 1
 
     print(f"\n[INFO] Démarrage de l'évaluation sur : {test_dir}")
@@ -80,20 +81,36 @@ def evaluate_dataset(
             })
             test_id += 1
 
-    df = pd.DataFrame(records)
-    if not df.empty:
-        df.to_csv(output_csv, index=False, encoding="utf-8")
-        accuracy = (df["is_correct"].sum() / len(df)) * 100
+    if records:
+        fieldnames = [
+            "test_id",
+            "image_name",
+            "expected_identity",
+            "predicted_identity",
+            "confidence_score",
+            "face_detected",
+            "is_correct",
+        ]
+        with open(output_csv, mode="w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(records)
+
+        total = len(records)
+        correct_count = sum(1 for r in records if r["is_correct"])
+        detected_count = sum(1 for r in records if r["face_detected"])
+        accuracy = (correct_count / total) * 100
+
         print(f"\n[RÉSULTAT DE L'ÉVALUATION]")
-        print(f"Total des tests : {len(df)}")
-        print(f"Visages détectés : {df['face_detected'].sum()} / {len(df)}")
-        print(f"Prédictions correctes : {df['is_correct'].sum()} / {len(df)}")
+        print(f"Total des tests : {total}")
+        print(f"Visages détectés : {detected_count} / {total}")
+        print(f"Prédictions correctes : {correct_count} / {total}")
         print(f"Précision globale (Accuracy) : {accuracy:.2f}%")
         print(f"Rapport sauvegardé dans : {output_csv}\n")
     else:
         print("[ATTENTION] Aucune image de test trouvée.")
 
-    return df
+    return records
 
 
 if __name__ == "__main__":
@@ -105,4 +122,3 @@ if __name__ == "__main__":
 
     rec = FaceRecognizer(cosine_threshold=args.threshold)
     evaluate_dataset(rec, Path(args.test_dir))
-
