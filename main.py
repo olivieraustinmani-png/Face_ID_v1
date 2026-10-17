@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-yrfrttgit
-=======
 """
 Point d'entrée principal de l'application Face_ID_v1.
 Reconnaissance faciale intelligente des étudiants en temps réel ou sur image fixe.
@@ -222,4 +219,3 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 
->>>>>>> b25c5308e8dc413e45a89f9aba4cd3c21153d8bc
