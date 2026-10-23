@@ -290,9 +290,16 @@ def encode_dataset(
                 )
                 continue
 
-            print(
-                f"[INFO] {len(faces)} visage(s) détecté(s)."
-            )
+           
+            if faces is None:
+                print(
+                    f"[AVERTISSEMENT] Détection impossible "
+                    f"pour l'image {img_path.name}."
+                )
+                continue
+
+            print(f"[INFO] {len(faces)} visage(s) détecté(s).")
+
 
             # Extraire les caractéristiques des visages détectés.
             results = encoder.extract_features(
