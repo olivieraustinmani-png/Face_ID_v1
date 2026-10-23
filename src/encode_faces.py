@@ -1,51 +1,94 @@
 """
-Module d'encodage des visages utilisant OpenCV SFace (Deep Learning).
-Ce module extrait les représentations vectorielles (embeddings 128D) des visages
-et permet d'encoder l'ensemble du jeu de données des étudiants.
+Module d'encodage des visages avec OpenCV SFace.
+
+Rôles :
+- Charger le modèle de reconnaissance SFace.
+- Détecter les visages avec YuNet.
+- Extraire les caractéristiques faciales.
+- Encoder les images du dataset des étudiants.
+- Sauvegarder les encodages dans un fichier pickle.
 """
 
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import pickle
+
 import cv2
 import numpy as np
 
 from src.detect_faces import FaceDetector
 
-# Chemins par défaut
-DEFAULT_SFACE_MODEL = Path(__file__).resolve().parent.parent / "models" / "face_recognition_sface_2021dec.onnx"
-DEFAULT_DATASET_DIR = Path(__file__).resolve().parent.parent / "dataset"
-DEFAULT_ENCODINGS_FILE = Path(__file__).resolve().parent.parent / "models" / "encodings.pkl"
 
-# Constante de comparaison cosinus compatible OpenCV 4.x et 5.x
-COSINE_METRIC = getattr(cv2, "FaceRecognizerSF_FR_COSINE", getattr(cv2.FaceRecognizerSF, "FR_COSINE", 0))
-L2_METRIC = getattr(cv2, "FaceRecognizerSF_FR_NORM_L2", getattr(cv2.FaceRecognizerSF, "FR_NORM_L2", 1))
+# ============================================================
+# CHEMINS PAR DEFAUT
+# ============================================================
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+DEFAULT_SFACE_MODEL = (
+    BASE_DIR / "models" / "face_recognition_sface_2021dec.onnx"
+)
+
+DEFAULT_DATASET_DIR = BASE_DIR / "dataset"
+
+DEFAULT_ENCODINGS_FILE = (
+    BASE_DIR / "models" / "encodings.pkl"
+)
+
+
+# ============================================================
+# CONSTANTES OPENCV
+# ============================================================
+
+COSINE_METRIC = getattr(
+    cv2,
+    "FaceRecognizerSF_FR_COSINE",
+    getattr(cv2.FaceRecognizerSF, "FR_COSINE", 0)
+)
 
 
 class FaceEncoder:
-    """Extracteur de caractéristiques faciales basé sur SFace."""
+    """Encodeur facial utilisant le modèle SFace."""
 
     def __init__(
         self,
         sface_model_path: Optional[str | Path] = None,
         detector: Optional[FaceDetector] = None,
     ) -> None:
-        """
-        Initialise l'encodeur SFace et le détecteur YuNet.
 
-        Args:
-            sface_model_path: Chemin vers le modèle ONNX SFace.
-            detector: Instance de FaceDetector existante (optionnel).
-        """
-        self.model_path = Path(sface_model_path) if sface_model_path else DEFAULT_SFACE_MODEL
-        if not self.model_path.exists():
+        # Déterminer le chemin du modèle.
+        self.model_path = (
+            Path(sface_model_path)
+            if sface_model_path
+            else DEFAULT_SFACE_MODEL
+        )
+
+        # Vérifier que le modèle existe.
+        if not self.model_path.is_file():
             raise FileNotFoundError(
-                f"Modèle SFace introuvable à l'emplacement : {self.model_path}.\n"
-                "Veuillez vérifier que le fichier est présent dans le dossier models/."
+                f"Modèle SFace introuvable : {self.model_path}"
             )
 
-        self.recognizer = cv2.FaceRecognizerSF.create(model=str(self.model_path), config="")
-        self.detector = detector if detector is not None else FaceDetector()
+        # Charger le modèle de reconnaissance.
+        try:
+            self.recognizer = cv2.FaceRecognizerSF.create(
+                model=str(self.model_path),
+                config=""
+            )
+        except cv2.error as exc:
+            raise RuntimeError(
+                "Impossible de charger le modèle SFace. "
+                "Vérifie que le fichier ONNX est valide."
+            ) from exc
+
+        print("[INFO] Modèle SFace chargé avec succès.")
+
+        # Réutiliser le détecteur fourni ou en créer un.
+        self.detector = (
+            detector if detector is not None else FaceDetector()
+        )
+
+        print("[INFO] Détecteur facial initialisé.")
 
     def extract_features(
         self,
@@ -53,43 +96,97 @@ class FaceEncoder:
         faces: Optional[np.ndarray] = None,
     ) -> List[Tuple[np.ndarray, np.ndarray]]:
         """
-        Détecte les visages (si non fournis) et extrait les vecteurs d'embeddings 128D.
+        Détecte les visages et extrait leurs caractéristiques.
 
-        Args:
-            image: Image BGR.
-            faces: Visages déjà détectés par YuNet (optionnel).
-
-        Returns:
-            List[Tuple[np.ndarray, np.ndarray]]: Liste de paires (face_info, embedding_128d).
+        Retour :
+            Liste de couples (informations_visage, embedding).
         """
-        if faces is None:
-            faces = self.detector.detect(image)
 
+        # Vérifier que l'image est exploitable.
+        if image is None or not isinstance(image, np.ndarray):
+            print("[ERREUR] Image invalide.")
+            return []
+
+        if image.size == 0:
+            print("[ERREUR] Image vide.")
+            return []
+
+        if image.ndim != 3 or image.shape[2] != 3:
+            print("[ERREUR] L'image doit être au format couleur BGR.")
+            return []
+
+        # Détecter les visages si les résultats ne sont pas fournis.
+        if faces is None:
+            try:
+                faces = self.detector.detect(image)
+            except Exception as exc:
+                print(f"[ERREUR] Échec de la détection : {exc}")
+                return []
+
+        # Aucun visage trouvé.
         if faces is None or len(faces) == 0:
             return []
 
         results = []
-        for face in faces:
-            # Alignement et recadrage normalisé (112x112)
-            aligned_face = self.recognizer.alignCrop(image, face)
-            # Extraction du vecteur de caractéristiques 128D
-            feature = self.recognizer.feature(aligned_face)
-            results.append((face, feature))
+
+        for index, face in enumerate(faces):
+
+            try:
+                # Aligner et recadrer le visage.
+                aligned_face = self.recognizer.alignCrop(
+                    image,
+                    face
+                )
+
+                if aligned_face is None or aligned_face.size == 0:
+                    print(
+                        f"[ATTENTION] Alignement impossible "
+                        f"pour le visage {index + 1}."
+                    )
+                    continue
+
+                # Extraire l'embedding facial.
+                feature = self.recognizer.feature(aligned_face)
+
+                if feature is None or feature.size == 0:
+                    print(
+                        f"[ATTENTION] Caractéristiques absentes "
+                        f"pour le visage {index + 1}."
+                    )
+                    continue
+
+                # Vérifier que le vecteur contient des valeurs finies.
+                if not np.isfinite(feature).all():
+                    print(
+                        f"[ATTENTION] Embedding invalide "
+                        f"pour le visage {index + 1}."
+                    )
+                    continue
+
+                results.append((face, feature))
+
+            except cv2.error as exc:
+                print(
+                    f"[ATTENTION] Erreur OpenCV sur le visage "
+                    f"{index + 1} : {exc}"
+                )
 
         return results
 
-    def compute_similarity(self, feat1: np.ndarray, feat2: np.ndarray) -> float:
-        """
-        Calcule la similarité cosinus entre deux vecteurs de caractéristiques.
+    def compute_similarity(
+        self,
+        feat1: np.ndarray,
+        feat2: np.ndarray,
+    ) -> float:
+        """Calcule la similarité cosinus entre deux embeddings."""
 
-        Args:
-            feat1: Premier vecteur (1, 128).
-            feat2: Second vecteur (1, 128).
-
-        Returns:
-            float: Score de similarité cosinus (plus la valeur est élevée, plus les visages sont proches).
-        """
-        return float(self.recognizer.match(feat1, feat2, COSINE_METRIC))
+        return float(
+            self.recognizer.match(
+                feat1,
+                feat2,
+                COSINE_METRIC
+            )
+        )
 
 
 def encode_dataset(
@@ -98,95 +195,210 @@ def encode_dataset(
     encoder: Optional[FaceEncoder] = None,
 ) -> Dict[str, Any]:
     """
-    Parcourt le dossier dataset/, extrait les représentations faciales des étudiants
-    et enregistre le dictionnaire d'encodages.
-
-    Args:
-        dataset_dir: Répertoire contenant les dossiers des étudiants.
-        output_file: Fichier où sauvegarder les encodages sérialisés.
-        encoder: Instance de FaceEncoder.
-
-    Returns:
-        Dict[str, Any]: Dictionnaire contenant les noms et les encodages correspondants.
+    Parcourt le dataset et sauvegarde les embeddings obtenus.
     """
-    dataset_path = Path(dataset_dir) if dataset_dir else DEFAULT_DATASET_DIR
-    output_path = Path(output_file) if output_file else DEFAULT_ENCODINGS_FILE
 
+    dataset_path = (
+        Path(dataset_dir) if dataset_dir else DEFAULT_DATASET_DIR
+    )
+
+    output_path = (
+        Path(output_file)
+        if output_file
+        else DEFAULT_ENCODINGS_FILE
+    )
+
+    # Vérifier l'existence du dataset.
+    if not dataset_path.is_dir():
+        raise FileNotFoundError(
+            f"Dataset introuvable : {dataset_path}"
+        )
+
+    # Initialiser l'encodeur.
     if encoder is None:
         encoder = FaceEncoder()
 
-    valid_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+    valid_extensions = {
+        ".jpg", ".jpeg", ".png", ".bmp", ".webp"
+    }
+
     known_names: List[str] = []
     known_encodings: List[np.ndarray] = []
     stats: Dict[str, int] = {}
 
-    student_dirs = sorted([d for d in dataset_path.iterdir() if d.is_dir()])
-    print(f"\n[INFO] Démarrage de l'encodage du dataset : {dataset_path}")
-    print(f"[INFO] {len(student_dirs)} dossiers d'étudiants trouvés.\n")
+    total_images = 0
+    unreadable_images = 0
+    images_without_faces = 0
+    images_with_faces = 0
+
+    student_dirs = sorted(
+        directory
+        for directory in dataset_path.iterdir()
+        if directory.is_dir()
+    )
+
+    print("\n" + "=" * 60)
+    print("DÉMARRAGE DE L'ENCODAGE DU DATASET")
+    print("=" * 60)
+
+    print(f"[INFO] Dataset : {dataset_path}")
+    print(f"[INFO] Dossiers d'étudiants : {len(student_dirs)}")
+
+    if not student_dirs:
+        print(
+            "[ATTENTION] Aucun sous-dossier d'étudiant trouvé."
+        )
 
     for student_dir in student_dirs:
+
         student_name = student_dir.name
-        image_files = [f for f in student_dir.iterdir() if f.suffix.lower() in valid_extensions]
+
+        image_files = sorted(
+            path
+            for path in student_dir.iterdir()
+            if path.is_file()
+            and path.suffix.lower() in valid_extensions
+        )
+
         stats[student_name] = 0
 
-        print(f" -> Traitement de '{student_name}' ({len(image_files)} images)...")
+        print(
+            f"\n[ÉTUDIANT] {student_name} "
+            f"({len(image_files)} image(s))"
+        )
+
+        if not image_files:
+            print(
+                "[ATTENTION] Aucune image reconnue dans ce dossier."
+            )
 
         for img_path in image_files:
-            image = cv2.imread(str(img_path))
-            if image is None:
-                print(f"    [ATTENTION] Impossible de lire : {img_path.name}")
+
+            total_images += 1
+
+            # Lire l'image en couleur.
+            image = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
+
+            
+            # Détecter les visages.
+            try:
+                faces = encoder.detector.detect(image)
+            except Exception as exc:
+                print(
+                    f"[ERREUR] Le détecteur a échoué "
+                    f"sur {img_path.name} : {exc}"
+                )
                 continue
 
-            results = encoder.extract_features(image)
+            print(
+                f"[INFO] {len(faces)} visage(s) détecté(s)."
+            )
+
+            # Extraire les caractéristiques des visages détectés.
+            results = encoder.extract_features(
+                image,
+                faces=faces
+            )
+
             if not results:
-                print(f"    [ATTENTION] Aucun visage détecté dans : {img_path.name}")
+                print(
+                    "[ATTENTION] Visage détecté, "
+                    "mais aucun embedding extrait."
+                )
                 continue
 
-            # On prend le visage ayant le score de détection le plus élevé
-            best_face, best_feature = max(results, key=lambda item: item[0][-1])
+            # Sélectionner le visage ayant le meilleur score
+            # de détection, situé à la dernière position du tableau.
+            best_face, best_feature = max(
+                results,
+                key=lambda item: float(item[0][-1])
+            )
+
             known_names.append(student_name)
             known_encodings.append(best_feature)
             stats[student_name] += 1
+            images_with_faces += 1
 
-    total_encodings = len(known_encodings)
-    print(f"\n[INFO] Encodage terminé : {total_encodings} représentations extraites au total.")
-    for name, count in stats.items():
-        print(f"   * {name} : {count} visage(s) encodé(s)")
+            print(
+                "[SUCCÈS] Embedding extrait : "
+                f"forme {best_feature.shape}"
+            )
 
+    # Construire le dictionnaire final.
     data_to_save = {
         "names": known_names,
         "encodings": known_encodings,
-        "classes": sorted(list(set(known_names))),
+        "classes": sorted(set(known_names)),
     }
 
-    # Sauvegarde sur disque
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "wb") as f:
-        pickle.dump(data_to_save, f)
+    # Sauvegarder uniquement si des encodages ont été obtenus.
+    if known_encodings:
 
-    print(f"[SUCCÈS] Encodages sauvegardés avec succès dans : {output_path}\n")
+        output_path.parent.mkdir(
+            parents=True,
+            exist_ok=True
+        )
+
+        with open(output_path, "wb") as file:
+            pickle.dump(data_to_save, file)
+
+        print(
+            f"\n[SUCCÈS] Encodages sauvegardés dans : "
+            f"{output_path}"
+        )
+
+    else:
+        print(
+            "\n[ATTENTION] Aucun encodage obtenu. "
+            "Le fichier existant n'a pas été remplacé."
+        )
+
+    # Afficher le bilan.
+    print("\n" + "=" * 60)
+    print("BILAN DE L'ENCODAGE")
+    print("=" * 60)
+
+    print(f"Images examinées : {total_images}")
+    print(f"Images illisibles : {unreadable_images}")
+    print(f"Images sans visage détecté : {images_without_faces}")
+    print(f"Images avec embedding extrait : {images_with_faces}")
+    print(f"Nombre total d'embeddings : {len(known_encodings)}")
+
+    print("\nDétail par étudiant :")
+
+    for name, count in stats.items():
+        print(f"  - {name} : {count} embedding(s)")
+
+    print("=" * 60 + "\n")
+
     return data_to_save
 
 
-def load_encodings(encodings_file: Optional[str | Path] = None) -> Optional[Dict[str, Any]]:
-    """
-    Charge les encodages pré-calculés depuis le disque.
+def load_encodings(
+    encodings_file: Optional[str | Path] = None,
+) -> Optional[Dict[str, Any]]:
+    """Charge les embeddings préalablement sauvegardés."""
 
-    Args:
-        encodings_file: Chemin vers le fichier pickle des encodages.
+    path = (
+        Path(encodings_file)
+        if encodings_file
+        else DEFAULT_ENCODINGS_FILE
+    )
 
-    Returns:
-        Dict ou None si le fichier n'existe pas.
-    """
-    path = Path(encodings_file) if encodings_file else DEFAULT_ENCODINGS_FILE
-    if not path.exists():
+    if not path.is_file():
+        print(f"[INFO] Fichier d'encodages absent : {path}")
         return None
 
-    with open(path, "rb") as f:
-        data = pickle.load(f)
+    with open(path, "rb") as file:
+        data = pickle.load(file)
+
+    print(
+        f"[INFO] {len(data.get('encodings', []))} "
+        "embedding(s) chargé(s)."
+    )
+
     return data
 
 
 if __name__ == "__main__":
     encode_dataset()
-

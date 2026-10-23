@@ -67,6 +67,8 @@ def capture_student_images(student_name: str, target_count: int = 30) -> None:
                 has_good_face = True
                 display = detector.draw_faces(display, faces)
 
+            frame = cv2.flip(frame, 1)
+            
             # Bandeau d'informations supérieur
             cv2.rectangle(display, (0, 0), (w, 55), (30, 30, 30), -1)
             status_text = f"{student_name} | Photos: {current_idx}/{target_count}"

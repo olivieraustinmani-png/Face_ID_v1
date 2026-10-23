@@ -10,14 +10,51 @@ import sys
 import time
 import cv2
 import numpy as np
+import json
 
 from src.detect_faces import FaceDetector
 from src.encode_faces import FaceEncoder, encode_dataset, DEFAULT_ENCODINGS_FILE, DEFAULT_DATASET_DIR
 from src.recognize_faces import FaceRecognizer
 from src.capture_dataset import capture_student_images
 
-RESULTS_DIR = Path(__file__).resolve().parent / "results" / "screenshots"
+BASE_DIR = Path(__file__).resolve().parent
 
+RESULTS_DIR = BASE_DIR / "results" / "screenshots"
+
+def load_student_names():
+    names_file = BASE_DIR / "students.json"
+
+    if not names_file.exists():
+        print("[ATTENTION] Le fichier students.json est introuvable.")
+        return {}
+
+    try:
+        with names_file.open("r", encoding="utf-8") as file:
+            data = json.load(file)
+
+        if not isinstance(data, dict):
+            print("[ERREUR] students.json doit contenir un objet JSON.")
+            return {}
+
+        return data
+
+    except json.JSONDecodeError:
+        print("[ERREUR] Le fichier students.json contient un JSON invalide.")
+        return {}
+
+def apply_student_names(results, student_names):
+    """Remplace les identifiants techniques par les noms à afficher."""
+
+    for result in results:
+        student_id = result.get("name", "Inconnu")
+
+        if student_id not in ("Inconnu", "Unknown", None):
+            result["name"] = student_names.get(
+                student_id,
+                student_id
+            )
+
+    return results
 
 def run_webcam(recognizer: FaceRecognizer, camera_index: int = 0) -> None:
     """Lance la reconnaissance faciale en temps réel sur le flux webcam."""
@@ -50,6 +87,10 @@ def run_webcam(recognizer: FaceRecognizer, camera_index: int = 0) -> None:
 
             # Détection et identification
             results = recognizer.recognize_frame(frame)
+
+            student_names = load_student_names()
+            results = apply_student_names(results, student_names)
+
             annotated = recognizer.annotate_frame(frame, results)
 
             # Informations d'état et FPS
@@ -105,6 +146,10 @@ def run_image(recognizer: FaceRecognizer, image_path: Path) -> None:
 
     print(f"\n[INFO] Analyse de l'image : {image_path.name}")
     results = recognizer.recognize_frame(frame)
+
+    student_names = load_student_names()
+    results = apply_student_names(results, student_names)
+
     annotated = recognizer.annotate_frame(frame, results)
 
     print(f"[RÉSULTAT] {len(results)} visage(s) détecté(s) :")
@@ -161,14 +206,32 @@ def interactive_menu(recognizer: FaceRecognizer) -> None:
             recognizer.reload_encodings()
 
         elif choice == "4":
-            student = input("Identifiant de l'étudiant (ex: student_01) : ").strip()
+            student = input(
+                "Identifiant de l'étudiant (ex: student_01) : "
+            ).strip()
+
             if student:
-                count_str = input("Nombre d'images à capturer (défaut: 30) : ").strip()
+                count_str = input(
+                    "Nombre d'images à capturer (défaut : 30) : "
+                ).strip()
+
                 count = int(count_str) if count_str.isdigit() else 30
+
+                if count < 1:
+                    print("[ERREUR] Le nombre d'images doit être supérieur à zéro.")
+                    continue
+
                 capture_student_images(student, count)
-                reload_prompt = input("Souhaitez-vous mettre à jour la base d'encodages maintenant ? (o/n) : ").lower()
+
+                reload_prompt = input(
+                    "Souhaitez-vous mettre à jour la base d'encodages maintenant ? (o/n) : "
+                ).lower().strip()
+
                 if reload_prompt == "o":
-                    encode_dataset(DEFAULT_DATASET_DIR, DEFAULT_ENCODINGS_FILE)
+                    encode_dataset(
+                        DEFAULT_DATASET_DIR,
+                        DEFAULT_ENCODINGS_FILE
+                    )
                     recognizer.reload_encodings()
 
         elif choice == "5":
@@ -188,34 +251,85 @@ def interactive_menu(recognizer: FaceRecognizer) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Application Face_ID_v1 - Reconnaissance faciale intelligente.")
-    parser.add_argument("--mode", choices=["webcam", "image", "encode", "capture", "menu"], default="menu",
-                        help="Mode d'exécution de l'application.")
-    parser.add_argument("--image", type=str, default="", help="Chemin de l'image (mode image).")
-    parser.add_argument("--student", type=str, default="student_01", help="Nom de l'étudiant (mode capture).")
-    parser.add_argument("--threshold", type=float, default=0.363, help="Seuil de similarité cosinus (défaut: 0.363).")
-    parser.add_argument("--camera", type=int, default=0, help="Index de la caméra (défaut: 0).")
+    parser = argparse.ArgumentParser(
+        description="Application Face_ID_v1 - Reconnaissance faciale intelligente."
+    )
+
+    parser.add_argument(
+        "--mode",
+        choices=["webcam", "image", "encode", "capture", "menu"],
+        default="menu",
+        help="Mode d'exécution de l'application."
+    )
+
+    parser.add_argument(
+        "--image",
+        type=str,
+        default="",
+        help="Chemin de l'image (mode image)."
+    )
+
+    parser.add_argument(
+        "--student",
+        type=str,
+        default="student_01",
+        help="Identifiant de l'étudiant (mode capture)."
+    )
+
+    parser.add_argument(
+        "--count",
+        type=int,
+        default=30,
+        help="Nombre d'images à capturer."
+    )
+
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.363,
+        help="Seuil de similarité cosinus."
+    )
+
+    parser.add_argument(
+        "--camera",
+        type=int,
+        default=0,
+        help="Index de la caméra."
+    )
 
     args = parser.parse_args()
 
-    # Initialisation du module de reconnaissance
-    recognizer = FaceRecognizer(cosine_threshold=args.threshold)
+    recognizer = FaceRecognizer(
+        cosine_threshold=args.threshold
+    )
 
     if args.mode == "encode":
-        encode_dataset(DEFAULT_DATASET_DIR, DEFAULT_ENCODINGS_FILE)
+        encode_dataset(
+            DEFAULT_DATASET_DIR,
+            DEFAULT_ENCODINGS_FILE
+        )
+        recognizer.reload_encodings()
+
     elif args.mode == "capture":
-        capture_student_images(args.student)
+        if args.count < 1:
+            print("[ERREUR] Le nombre d'images doit être supérieur à zéro.")
+            sys.exit(1)
+
+        capture_student_images(args.student, args.count)
+
     elif args.mode == "image":
         if not args.image:
-            print("[ERREUR] Veuillez spécifier une image avec l'argument --image <chemin>")
+            print("[ERREUR] Veuillez spécifier une image avec --image.")
             sys.exit(1)
+
         run_image(recognizer, Path(args.image))
+
     elif args.mode == "webcam":
         run_webcam(recognizer, camera_index=args.camera)
+
     else:
         interactive_menu(recognizer)
 
 
 if __name__ == "__main__":
     main()
-
